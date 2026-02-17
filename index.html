@@ -33,14 +33,6 @@
     button:disabled { background: #9ca3af; cursor: not-allowed; }
     .loading { display: none; }
     .loading.active { display: block; text-align: center; color: #666; padding: 20px; }
-    .log { 
-      display: none;
-    }
-    .log-error { color: #ef4444; }
-    .log-info { color: #3b82f6; }
-    .log-success { color: #22c55e; }
-    .log-warn { color: #f59e0b; }
-    .log-translate { color: #a78bfa; }
     .error { background: #fee2e2; color: #991b1b; padding: 12px; border-radius: 6px; margin-bottom: 12px; }
     .news-list { list-style: none; }
     .news-item {
@@ -81,9 +73,6 @@
   <ul id="newsList" class="news-list"></ul>
 
   <script>
-    // Logging disabled for production
-    function log(msg, type = 'info') { console.log(msg); }
-
     const FEEDS = [
       { name: 'ITmedia NEWS', url: 'https://rss.itmedia.co.jp/rss/2.0/news_bursts.xml', lang: 'jp', timeout: 8000 },
       { name: 'INTERNET Watch', url: 'https://internet.watch.impress.co.jp/data/rss/1.0/iw/feed.rdf', lang: 'jp', timeout: 8000 },
@@ -182,22 +171,18 @@
           const text = await response.text();
           const news = parseRSS(text, feed.name, feed.lang);
           if (news.length > 0 || text.length > 100) {
-            log(`${feed.name}: ${news.length}件取得 (${proxy.name})`, 'success');
             return news;
           }
         } catch (e) {
-          log(`${feed.name}: ${proxy.name}失敗 - ${e.name === 'AbortError' ? 'タイムアウト' : e.message}`, 'warn');
+          // エラーはスキップ
         }
       }
-      log(`${feed.name}: 全て失敗`, 'error');
       return { error: feed.name };
     }
 
     async function translateNews(newsList) {
       const enNews = newsList.filter(n => n.lang === 'en' && !n.translated);
-      log(`${enNews.length}件の英語を翻訳中...`, 'translate');
       
-      // バッチ翻訳（一度に5件ずつ）
       const batchSize = 5;
       for (let i = 0; i < enNews.length; i += batchSize) {
         const batch = enNews.slice(i, i + batchSize);
@@ -209,9 +194,6 @@
           }
         }));
       }
-      
-      const translatedCount = enNews.filter(n => n.translated).length;
-      log(`翻訳完了: ${translatedCount}/${enNews.length}件`, 'translate');
     }
 
     async function loadNews() {
@@ -220,14 +202,11 @@
       const list = document.getElementById('newsList');
       const statsEl = document.getElementById('stats');
       
-      logEl.innerHTML = '';
       btn.disabled = true;
       btn.textContent = '読み込み中...';
       status.innerHTML = '<div class="loading active">RSSフィードを取得中...</div>';
       list.innerHTML = '';
       statsEl.innerHTML = '';
-
-      log('=== ニュース取得開始 ===', 'info');
 
       const results = await Promise.all(FEEDS.map(feed => fetchFeed(feed)));
       
@@ -250,7 +229,6 @@
       }
 
       statsEl.innerHTML = `合計: ${allNews.length}件のニュース`;
-      log(`=== 完了: ${allNews.length}件 ===`, 'success');
       
       if (allNews.length > 0) {
         allNews.forEach(news => {
