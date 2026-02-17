@@ -98,8 +98,8 @@
       { url: 'https://corsproxy.io/?', name: 'corsproxy' },
     ];
 
-    // MyMemory翻訳API
-    async function translateMyMemory(text) {
+    // 翻译API
+    async function translateToJapanese(text) {
       try {
         const encodedText = encodeURIComponent(text);
         const url = `https://api.mymemory.translated.net/get?q=${encodedText}&langpair=en|ja`;
@@ -111,43 +111,9 @@
           return data.responseData.translatedText;
         }
       } catch (e) {
-        console.error('MyMemory error:', e);
+        console.error('Translation error:', e);
       }
       return null;
-    }
-
-    // LibreTranslate API (フォールバック)
-    async function translateLibre(text) {
-      try {
-        const url = 'https://libretranslate.com/translate';
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ q: text, source: 'en', target: 'ja' })
-        });
-        const data = await response.json();
-        if (data.translatedText) {
-          return data.translatedText;
-        }
-      } catch (e) {
-        console.error('LibreTranslate error:', e);
-      }
-      return null;
-    }
-
-    // 翻訳 - 確実に翻訳するまでリトライ
-    async function translateToJapanese(text, retries = 5) {
-      for (let attempt = 0; attempt < retries; attempt++) {
-        // 待機
-        await new Promise(resolve => setTimeout(resolve, 300 + attempt * 200));
-        
-        // MyMemoryで试试
-        const result = await translateMyMemory(text);
-        if (result && result !== text && result.length > 5) {
-          return result;
-        }
-      }
-      return text; // 翻译不能なら元のテキスト返回
     }
 
     function matchesAI(title, description = '') {
@@ -198,8 +164,7 @@
               time: timeStr, 
               source: sourceName, 
               lang, 
-              date: date,
-              translated: false 
+              date: date 
             });
           }
         });
@@ -241,25 +206,36 @@
       return { error: feed.name };
     }
 
-    // 翻訳処理 - 全て確実に翻訳
-    async function translateNews(newsList) {
-      const enNews = newsList.filter(n => n.lang === 'en' && !n.translated);
-      const total = enNews.length;
+    // 翻译更新（バックグラウンド）
+    function updateTranslation(newsList) {
+      const enNews = newsList.filter(n => n.lang === 'en');
+      let translated = 0;
       
-      // 1つずつ翻訳
-      for (let i = 0; i < enNews.length; i++) {
-        const news = enNews[i];
-        const result = await translateToJapanese(news.title, 5);
-        
-        if (result && result !== news.title) {
-          news.title = result;
-          news.translated = true;
-        }
-        
-        console.log(`翻訳中: ${i+1}/${total}`);
+      enNews.forEach((news, index) => {
+        setTimeout(async () => {
+          const result = await translateToJapanese(news.title);
+          if (result && result !== news.title) {
+            news.title = result;
+            
+            // DOM更新
+            const list = document.getElementById('newsList');
+            const items = list.querySelectorAll('.news-item');
+            if (items[index]) {
+              const link = items[index].querySelector('a');
+              if (link) link.textContent = result;
+            }
+          }
+          translated++;
+          if (translated === enNews.length) {
+            document.getElementById('status').innerHTML = '';
+          }
+        }, index * 800); // 0.8秒ずつずらす
+      });
+      
+      // 翻译中の表示
+      if (enNews.length > 0) {
+        document.getElementById('status').innerHTML = '<div class="loading active">英語を翻訳中...</div>';
       }
-      
-      console.log(`翻訳完了: ${total}件`);
     }
 
     async function loadNews() {
@@ -287,10 +263,6 @@
         return b.date - a.date;
       });
 
-      // 翻訳
-      status.innerHTML = '<div class="loading active">英語を翻訳中...</div>';
-      await translateNews(allNews);
-
       status.innerHTML = '';
       if (errors.length > 0) {
         status.innerHTML = `<div class="error">エラー: ${errors.join(', ')}</div>`;
@@ -298,11 +270,13 @@
 
       statsEl.innerHTML = `合計: ${allNews.length}件のニュース`;
       
+      // 表示
       if (allNews.length > 0) {
-        allNews.forEach(news => {
+        allNews.forEach((news, index) => {
           const li = document.createElement('li');
           li.className = 'news-item';
-          const tooltip = news.lang === 'en' && news.originalTitle !== news.title ? ` title="原文: ${news.originalTitle.replace(/"/g, '&quot;')}"` : '';
+          li.id = 'news-' + index;
+          const tooltip = news.lang === 'en' ? ` title="原文: ${news.originalTitle.replace(/"/g, '&quot;')}"` : '';
           li.innerHTML = `
             <a href="${news.link}" target="_blank" rel="noopener"${tooltip}>${news.title}</a>
             <div class="news-meta">
@@ -312,6 +286,9 @@
           `;
           list.appendChild(li);
         });
+        
+        // バックグラウンドで翻訳
+        updateTranslation(allNews);
       }
 
       btn.disabled = false;
