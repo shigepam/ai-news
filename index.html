@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI News Collector</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    h1 { font-size: 1.5rem; color: #333; }
+    button {
+      padding: 8px 16px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    button:hover { background: #1d4ed8; }
+    button:disabled { background: #9ca3af; cursor: not-allowed; }
+    .loading { display: none; }
+    .loading.active { display: block; text-align: center; color: #666; padding: 20px; }
+    .log { 
+      background: #1e293b; 
+      color: #22c55e; 
+      padding: 12px; 
+      border-radius: 6px; 
+      margin-bottom: 12px;
+      font-family: monospace;
+      font-size: 0.75rem;
+      white-space: pre-wrap;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+    .log-error { color: #ef4444; }
+    .log-info { color: #3b82f6; }
+    .log-success { color: #22c55e; }
+    .log-warn { color: #f59e0b; }
+    .log-translate { color: #a78bfa; }
+    .error { background: #fee2e2; color: #991b1b; padding: 12px; border-radius: 6px; margin-bottom: 12px; }
+    .news-list { list-style: none; }
+    .news-item {
+      background: white;
+      padding: 16px;
+      margin-bottom: 12px;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .news-item a {
+      color: #1e40af;
+      text-decoration: none;
+      font-size: 1rem;
+      font-weight: 500;
+      display: block;
+      margin-bottom: 8px;
+    }
+    .news-item a:hover { text-decoration: underline; }
+    .news-meta {
+      display: flex;
+      gap: 12px;
+      font-size: 0.8rem;
+      color: #666;
+      flex-wrap: wrap;
+    }
+    .source-jp { background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }
+    .source-en { background: #fce7f3; color: #9d174d; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }
+    .stats { font-size: 0.8rem; color: #666; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🤖 AI News</h1>
+    <button id="refreshBtn" onclick="loadNews()">更新</button>
+  </header>
+  <div id="log" class="log"></div>
+  <div id="status"></div>
+  <div id="stats" class="stats"></div>
+  <ul id="newsList" class="news-list"></ul>
+
+  <script>
+    const logEl = document.getElementById('log');
+    function log(msg, type = 'info') {
+      const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : type === 'warn' ? '⚠️' : type === 'translate' ? '🌐' : 'ℹ️';
+      logEl.innerHTML += `<div class="log-${type}">${prefix} ${msg}</div>\n`;
+    }
+
+    const FEEDS = [
+      { name: 'ITmedia NEWS', url: 'https://rss.itmedia.co.jp/rss/2.0/news_bursts.xml', lang: 'jp', timeout: 8000 },
+      { name: 'INTERNET Watch', url: 'https://internet.watch.impress.co.jp/data/rss/1.0/iw/feed.rdf', lang: 'jp', timeout: 8000 },
+      { name: 'Gigazine', url: 'https://gigazine.net/news/rss_2.0/', lang: 'jp', timeout: 8000 },
+      { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml', lang: 'en', timeout: 8000 },
+      { name: 'Ars Technica', url: 'https://feeds.arstechnica.com/arstechnica/index', lang: 'en', timeout: 8000 },
+      { name: 'VentureBeat', url: 'https://venturebeat.com/feed/', lang: 'en', timeout: 8000 },
+      { name: 'Wired', url: 'https://www.wired.com/feed/rss', lang: 'en', timeout: 8000 },
+    ];
+
+    const AI_KEYWORDS = [
+      'ai', 'artificial intelligence', 'machine learning', 'deep learning',
+      'chatgpt', 'gpt', 'claude', 'gemini', 'llm', 'openai', 'anthropic',
+      'neural', 'gpu', 'nvidia', 'amd ai', 'intel ai', 'tpu',
+      '生成ai', '人工知能', '機械学習', '深層学習', '大規模言語モデル',
+      'chatgpt', 'gemini', 'claude', 'openai',
+      'transformer', 'sora', 'stable diffusion', 'midjourney', '画像生成', '動画生成',
+      'autonomous', 'self-driving', 'robot', 'automation', 'drone',
+    ];
+
+    const PROXIES = [
+      { url: 'https://api.allorigins.win/raw?url=', name: 'allorigins' },
+      { url: 'https://corsproxy.io/?', name: 'corsproxy' },
+    ];
+
+    // MyMemory翻訳APIを使用
+    async function translateToJapanese(text) {
+      try {
+        const encodedText = encodeURIComponent(text);
+        const url = `https://api.mymemory.translated.net/get?q=${encodedText}&langpair=en|ja`;
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.responseStatus === 200 && data.responseData) {
+          return data.responseData.translatedText;
+        }
+      } catch (e) {
+        console.error('Translation error:', e);
+      }
+      return null;
+    }
+
+    function matchesAI(title, description = '') {
+      const text = (title + ' ' + (description || '')).toLowerCase();
+      return AI_KEYWORDS.some(kw => text.includes(kw));
+    }
+
+    function parseRSS(xmlStr, sourceName, lang) {
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xmlStr, 'application/xml');
+        const parseError = doc.querySelector('parsererror');
+        if (parseError) return [];
+        const items = doc.querySelectorAll('item, entry');
+        const news = [];
+        items.forEach((item) => {
+          const titleEl = item.querySelector('title');
+          const title = titleEl ? titleEl.textContent?.trim() : '';
+          let link = '';
+          const linkEl = item.querySelector('link');
+          if (linkEl) link = linkEl.textContent?.trim() || linkEl.getAttribute('href') || '';
+          const descEl = item.querySelector('description, summary, content\\:content, content');
+          const description = descEl ? descEl.textContent?.trim() || '' : '';
+          const dateEl = item.querySelector('pubDate, published, date, dc\\:date');
+          const pubDate = dateEl ? dateEl.textContent?.trim() || '' : '';
+          if (title && matchesAI(title, description)) {
+            let date = null, timeStr = '';
+            try { date = new Date(pubDate); if (!isNaN(date)) timeStr = date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch(e) {}
+            news.push({ title: title, originalTitle: title, link, time: timeStr, source: sourceName, lang, date, translated: false });
+          }
+        });
+        return news;
+      } catch (e) { return []; }
+    }
+
+    async function fetchWithTimeout(url, timeoutMs = 8000) {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(id);
+        return response;
+      } catch (e) {
+        clearTimeout(id);
+        throw e;
+      }
+    }
+
+    async function fetchFeed(feed) {
+      for (const proxy of PROXIES) {
+        try {
+          const url = proxy.url + encodeURIComponent(feed.url);
+          const response = await fetchWithTimeout(url, feed.timeout || 8000);
+          if (!response.ok) continue;
+          const text = await response.text();
+          const news = parseRSS(text, feed.name, feed.lang);
+          if (news.length > 0 || text.length > 100) {
+            log(`${feed.name}: ${news.length}件取得 (${proxy.name})`, 'success');
+            return news;
+          }
+        } catch (e) {
+          log(`${feed.name}: ${proxy.name}失敗 - ${e.name === 'AbortError' ? 'タイムアウト' : e.message}`, 'warn');
+        }
+      }
+      log(`${feed.name}: 全て失敗`, 'error');
+      return { error: feed.name };
+    }
+
+    async function translateNews(newsList) {
+      const enNews = newsList.filter(n => n.lang === 'en' && !n.translated);
+      log(`${enNews.length}件の英語を翻訳中...`, 'translate');
+      
+      // バッチ翻訳（一度に5件ずつ）
+      const batchSize = 5;
+      for (let i = 0; i < enNews.length; i += batchSize) {
+        const batch = enNews.slice(i, i + batchSize);
+        await Promise.all(batch.map(async (news) => {
+          const translated = await translateToJapanese(news.title);
+          if (translated) {
+            news.title = translated;
+            news.translated = true;
+          }
+        }));
+      }
+      
+      const translatedCount = enNews.filter(n => n.translated).length;
+      log(`翻訳完了: ${translatedCount}/${enNews.length}件`, 'translate');
+    }
+
+    async function loadNews() {
+      const btn = document.getElementById('refreshBtn');
+      const status = document.getElementById('status');
+      const list = document.getElementById('newsList');
+      const statsEl = document.getElementById('stats');
+      
+      logEl.innerHTML = '';
+      btn.disabled = true;
+      btn.textContent = '読み込み中...';
+      status.innerHTML = '<div class="loading active">RSSフィードを取得中...</div>';
+      list.innerHTML = '';
+      statsEl.innerHTML = '';
+
+      log('=== ニュース取得開始 ===', 'info');
+
+      const results = await Promise.all(FEEDS.map(feed => fetchFeed(feed)));
+      
+      const errors = results.filter(r => r.error).map(r => r.source);
+      let allNews = results.filter(r => !r.error).flat();
+
+      // 翻訳
+      await translateNews(allNews);
+
+      allNews.sort((a, b) => {
+        if (!a.date && !b.date) return 0;
+        if (!a.date) return 1;
+        if (!b.date) return -1;
+        return b.date - a.date;
+      });
+
+      status.innerHTML = '';
+      if (errors.length > 0) {
+        status.innerHTML = `<div class="error">エラー: ${errors.join(', ')}</div>`;
+      }
+
+      statsEl.innerHTML = `合計: ${allNews.length}件のニュース`;
+      log(`=== 完了: ${allNews.length}件 ===`, 'success');
+      
+      if (allNews.length > 0) {
+        allNews.forEach(news => {
+          const li = document.createElement('li');
+          li.className = 'news-item';
+          const tooltip = news.lang === 'en' && news.originalTitle !== news.title ? ` title="原文: ${news.originalTitle.replace(/"/g, '&quot;')}"` : '';
+          li.innerHTML = `
+            <a href="${news.link}" target="_blank" rel="noopener"${tooltip}>${news.title}</a>
+            <div class="news-meta">
+              <span class="${news.lang === 'jp' ? 'source-jp' : 'source-en'}">${news.source}</span>
+              ${news.time ? `<span>${news.time}</span>` : ''}
+            </div>
+          `;
+          list.appendChild(li);
+        });
+      }
+
+      btn.disabled = false;
+      btn.textContent = '更新';
+    }
+
+    loadNews();
+  </script>
+</body>
+</html>
