@@ -73,6 +73,9 @@
   <ul id="newsList" class="news-list"></ul>
 
   <script>
+    // ログはコンソール에만 출력（페이지에는 表示されない）
+    function log(msg) { console.log(msg); }
+
     const FEEDS = [
       { name: 'ITmedia NEWS', url: 'https://rss.itmedia.co.jp/rss/2.0/news_bursts.xml', lang: 'jp', timeout: 8000 },
       { name: 'INTERNET Watch', url: 'https://internet.watch.impress.co.jp/data/rss/1.0/iw/feed.rdf', lang: 'jp', timeout: 8000 },
@@ -98,7 +101,7 @@
       { url: 'https://corsproxy.io/?', name: 'corsproxy' },
     ];
 
-    // MyMemory翻訳APIを使用
+    // MyMemory翻訳API
     async function translateToJapanese(text) {
       try {
         const encodedText = encodeURIComponent(text);
@@ -127,26 +130,53 @@
         const doc = parser.parseFromString(xmlStr, 'application/xml');
         const parseError = doc.querySelector('parsererror');
         if (parseError) return [];
+        
         const items = doc.querySelectorAll('item, entry');
         const news = [];
+        
         items.forEach((item) => {
           const titleEl = item.querySelector('title');
           const title = titleEl ? titleEl.textContent?.trim() : '';
+          
           let link = '';
           const linkEl = item.querySelector('link');
-          if (linkEl) link = linkEl.textContent?.trim() || linkEl.getAttribute('href') || '';
+          if (linkEl) {
+            link = linkEl.textContent?.trim() || linkEl.getAttribute('href') || '';
+          }
+          
           const descEl = item.querySelector('description, summary, content\\:content, content');
           const description = descEl ? descEl.textContent?.trim() || '' : '';
+          
           const dateEl = item.querySelector('pubDate, published, date, dc\\:date');
           const pubDate = dateEl ? dateEl.textContent?.trim() || '' : '';
+          
           if (title && matchesAI(title, description)) {
-            let date = null, timeStr = '';
-            try { date = new Date(pubDate); if (!isNaN(date)) timeStr = date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch(e) {}
-            news.push({ title: title, originalTitle: title, link, time: timeStr, source: sourceName, lang, date, translated: false });
+            let date = null;
+            let timeStr = '';
+            try {
+              date = new Date(pubDate);
+              if (!isNaN(date)) {
+                timeStr = date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+              }
+            } catch(e) {}
+            
+            news.push({ 
+              title: title, 
+              originalTitle: title, 
+              link, 
+              time: timeStr, 
+              source: sourceName, 
+              lang, 
+              date: date,
+              translated: false 
+            });
           }
         });
+        
         return news;
-      } catch (e) { return []; }
+      } catch (e) { 
+        return []; 
+      }
     }
 
     async function fetchWithTimeout(url, timeoutMs = 8000) {
@@ -171,10 +201,11 @@
           const text = await response.text();
           const news = parseRSS(text, feed.name, feed.lang);
           if (news.length > 0 || text.length > 100) {
+            log(`${feed.name}: ${news.length}件取得`);
             return news;
           }
         } catch (e) {
-          // エラーはスキップ
+          log(`${feed.name}: エラー - ${e.message}`);
         }
       }
       return { error: feed.name };
@@ -208,20 +239,23 @@
       list.innerHTML = '';
       statsEl.innerHTML = '';
 
+      log('=== ニュース取得開始 ===');
+
       const results = await Promise.all(FEEDS.map(feed => fetchFeed(feed)));
       
       const errors = results.filter(r => r.error).map(r => r.source);
       let allNews = results.filter(r => !r.error).flat();
 
-      // 翻訳
-      await translateNews(allNews);
-
+      // 日時でソート（新しい順）
       allNews.sort((a, b) => {
         if (!a.date && !b.date) return 0;
         if (!a.date) return 1;
         if (!b.date) return -1;
-        return b.date - a.date;
+        return b.date - a.date; // 新しい日が先
       });
+
+      // 翻訳
+      await translateNews(allNews);
 
       status.innerHTML = '';
       if (errors.length > 0) {
@@ -229,6 +263,7 @@
       }
 
       statsEl.innerHTML = `合計: ${allNews.length}件のニュース`;
+      log(`=== 完了: ${allNews.length}件 ===`);
       
       if (allNews.length > 0) {
         allNews.forEach(news => {
