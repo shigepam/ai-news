@@ -34,16 +34,7 @@
     .loading { display: none; }
     .loading.active { display: block; text-align: center; color: #666; padding: 20px; }
     .log { 
-      background: #1e293b; 
-      color: #22c55e; 
-      padding: 12px; 
-      border-radius: 6px; 
-      margin-bottom: 12px;
-      font-family: monospace;
-      font-size: 0.75rem;
-      white-space: pre-wrap;
-      max-height: 120px;
-      overflow-y: auto;
+      display: none;
     }
     .log-error { color: #ef4444; }
     .log-info { color: #3b82f6; }
@@ -85,17 +76,13 @@
     <h1>🤖 AI News</h1>
     <button id="refreshBtn" onclick="loadNews()">更新</button>
   </header>
-  <div id="log" class="log"></div>
   <div id="status"></div>
   <div id="stats" class="stats"></div>
   <ul id="newsList" class="news-list"></ul>
 
   <script>
-    const logEl = document.getElementById('log');
-    function log(msg, type = 'info') {
-      const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : type === 'warn' ? '⚠️' : type === 'translate' ? '🌐' : 'ℹ️';
-      logEl.innerHTML += `<div class="log-${type}">${prefix} ${msg}</div>\n`;
-    }
+    // Logging disabled for production
+    function log(msg, type = 'info') { console.log(msg); }
 
     const FEEDS = [
       { name: 'ITmedia NEWS', url: 'https://rss.itmedia.co.jp/rss/2.0/news_bursts.xml', lang: 'jp', timeout: 8000 },
